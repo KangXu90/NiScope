@@ -11,8 +11,8 @@ resourceName = 'DEV1';    % <<< 确保和 NI MAX 里的设备名一致, 如 'Dev
 channelID    = '0';       % 采集通道 (字符串形式，如 '0' 或 '0,1')
 maxRangeV    = 10.0;      % 垂直量程 (Volts)
 verticalOffset = 0.0;     % 垂直偏移 (Volts)
-sampleRate   = 1e6;     % 采样率 (Samples/second)
-recordLength = 500;     % 采集点数
+sampleRate   = 100e6;     % 采样率 (Samples/second)
+recordLength = 1000;     % 采集点数
 refPosition  = 50.0;      % 水平参考位置 (% of record length)
 minRecordTime = recordLength / sampleRate;   % 最小记录时间 (秒)
 numRecords   = 1;         % 记录数 (通常 1 即可)
@@ -45,11 +45,14 @@ configureVertical(niScopeDev, channelID, maxRangeV, verticalOffset, ...
                   coupling, probeAttenuation, channelEnabled);
 
 %% 4. Configure Horizontal Timing (采样率 & 记录长度)
-% samplerate = niScopeDev.sampleRate;
-%  enforceRealtime = true;
-% % % configureHorizontalTiming(obj, sampleRate, minRecordTime, refPosition, numRecords)
-%  configureHorizontalTiming(niScopeDev, sampleRate, minRecordTime, ...
-%                           refPosition, numRecords, enforceRealtime);
+enforceRealtime = true;
+configureHorizontalTiming(niScopeDev, sampleRate, recordLength, ...
+                          refPosition, numRecords, enforceRealtime);
+configuredsampleRate  = niScopeDev.sampleRate;
+fprintf("Actual sample rate = %.3f MS/s\n", configuredsampleRate/1e6);
+% fprintf("Actual record length = %d pts\n", niScopeDev.horizontalRecordLength);
+
+
 
 %% 5. Configure Trigger (这里用 Immediate Trigger，最简单)
 % 你也可以改成 configureTriggerEdge 来用边沿触发
