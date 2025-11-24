@@ -15,7 +15,7 @@ sampleRate     = 100e6;      % Sample rate (Samples/second)
 recordLength   = 50;       % Points PER RECORD
 refPosition    = 0.0;       % Reference position (% of record)
 numRecords     = 1;          % <<< 3 segments
-timeout_s      = 11.0;        % Timeout in seconds
+timeout_s      = 20.0;        % Timeout in seconds
 
 %% 1. Connect to the Instrument
 try
@@ -31,9 +31,9 @@ try
 catch ME
     warning('Reset/autoSetup failed or unsupported: %s', ME.message);
 end
-%% 3. Configure channel
+%% 3. Configure channel Characteristics
 inputImpedance = 50; % 50 ohm input impedance
-maxInputFrequency = 100e6; % filter bandwidth at input
+maxInputFrequency = 0; % filter bandwidth at input 0 means default
 
 configureChanCharacteristics(niScopeDev,channelID,inputImpedance,maxInputFrequency);
 
@@ -61,7 +61,7 @@ fprintf("Num records configured = %d\n", numRecords);
 
 %% 5. Configure Edge Trigger
 triggerSource = 'TRIG';    % e.g. "0",'1'.'TRIG'
-triggerLevel  = 0.5;          % Volts
+triggerLevel  = 1;          % Volts
 
 % Enums from ividev (check with 'enumeration' if needed)
 triggerSlope    = 1;   % rising edge
