@@ -12,10 +12,10 @@ channelID      = '0';        % Channel to acquire (string, e.g., '0' or '0,1')
 maxRangeV      = 10.0;       % Vertical range (Volts)
 verticalOffset = 0.0;        % Vertical offset (Volts)
 sampleRate     = 100e6;      % Sample rate (Samples/second)
-recordLength   = 50;       % Points PER RECORD
+recordLength   = 100;       % Points PER RECORD
 refPosition    = 0.0;       % Reference position (% of record)
-numRecords     = 1;          % <<< 3 segments
-timeout_s      = 20.0;        % Timeout in seconds
+numRecords     = 100;          % <<< 3 segments
+timeout_s      = 5.0;        % Timeout in seconds
 
 %% 1. Connect to the Instrument
 try
@@ -26,11 +26,11 @@ catch ME
 end
 
 %% 2. Basic Reset & Auto-Setup (optional)
-try
-    reset(niScopeDev);
-catch ME
-    warning('Reset/autoSetup failed or unsupported: %s', ME.message);
-end
+% try
+%      reset(niScopeDev);
+% catch ME
+%     warning('Reset/autoSetup failed or unsupported: %s', ME.message);
+% end
 %% 3. Configure channel Characteristics
 inputImpedance = 50; % 50 ohm input impedance
 maxInputFrequency = 0; % filter bandwidth at input 0 means default
@@ -82,117 +82,65 @@ timeout_ms = timeout_s * 1000;
 %% ========= OPTION A: Fetch ALL 3 records in ONE call =========
 % Use FetchRecordNumber / FetchNumRecords properties if they exist.
 % (If they don't, you can skip to OPTION B below.)
+%% ------ Attribute IDs from niScope.h ------
+NISCOPE_ATTR_FETCH_RECORD_NUMBER = 1150079;
+NISCOPE_ATTR_FETCH_NUM_RECORDS   = 1150080;
 
-try
-    % Start from record 0, fetch 3 records at once
-    %% Multi-record fetch setup
-    % NISCOPE_ATTR_FETCH_RECORD_NUMBER = 1150082;   % attribute ID from NI manual
-    % NISCOPE_ATTR_FETCH_NUM_RECORDS   = 1150083;
-    % 
-    % % Start from record 0
-    % setAttributeViInt32(niScopeDev, "", NISCOPE_ATTR_FETCH_RECORD_NUMBER, 0);
-    % 
-    % % Fetch 3 records
-    % setAttributeViInt32(niScopeDev, "", NISCOPE_ATTR_FETCH_NUM_RECORDS, 3);
+%% ------ Loop through each record WANT: record = 0,1,2,... ------
+wfmMat = zeros(recordLength, numRecords);
+tCell  = cell(1, numRecords);
 
-    % Then fetch normally
-    [wfm, info] = niScopeDev.fetch(channelID, timeout_ms, recordLength);
+for k = 0:(numRecords-1)
 
-    % Reshape: each record is recordLength long
-    wfmMat = reshape(wfm, recordLength, numRecords);
+    % -----------------------------------------
+    % 1. Tell the digitizer which record to fetch
+    % -----------------------------------------
+    setAttributeViInt32(niScopeDev, "", ...
+        NISCOPE_ATTR_FETCH_RECORD_NUMBER, k);
 
+    % -----------------------------------------
+    % 2. Tell the digitizer to fetch ONLY ONE record
+    % -----------------------------------------
+    setAttributeViInt32(niScopeDev, "", ...
+        NISCOPE_ATTR_FETCH_NUM_RECORDS, 1);
 
-    [waveformArray, waveformInfo] = niScopeDev.fetch(channelID, timeout_ms, recordLength);
+    % Optional debug print
+    currRec  = getAttributeViInt32(niScopeDev, "", NISCOPE_ATTR_FETCH_RECORD_NUMBER);
+    currNRec = getAttributeViInt32(niScopeDev, "", NISCOPE_ATTR_FETCH_NUM_RECORDS);
+    fprintf("Loop %d → FetchRecordNumber=%d  FetchNumRecords=%d\n", ...
+        k, currRec, currNRec);
 
-    % waveformArray is 1D: [Rec0(1..N), Rec1(1..N), Rec2(1..N)]
-    if isfield(waveformInfo, 'actualSamples')
-        N = double(waveformInfo(1).actualSamples);   % points per record
-    else
-        N = recordLength;
-    end
+    % -----------------------------------------
+    % 3. Actually fetch this record
+    % -----------------------------------------
+    [wfm_k, pts_k, t0_k, dt_k] = fetchWaveform(niScopeDev, channelID, recordLength);
 
-    % Reshape into N x numRecords
-    wfmMat = reshape(waveformArray, N, []);   % each column = one segment
+    % -----------------------------------------
+    % 4. Store waveform
+    % -----------------------------------------
+    wfmMat(1:pts_k, k+1) = wfm_k;
 
-    % Build time axis
-    if isfield(waveformInfo(1), 'xIncrement')
-        dt = waveformInfo(1).xIncrement;
-    else
-        dt = 1 / sampleRate;
-    end
-
-    if isfield(waveformInfo(1), 'xOrigin')
-        t0 = waveformInfo(1).xOrigin;
-    else
-        t0 = 0;
-    end
-
-    t = t0 + (0:N-1) * dt;
-
-    figure;
-    plot(t', wfmMat);
-    grid on;
-    xlabel('Time (s)');
-    ylabel('Voltage (V)');
-    legend(arrayfun(@(k) sprintf('Record %d', k), 0:numRecords-1, 'UniformOutput', false));
-    title(sprintf('Channel %s, %d records (edge-triggered)', channelID, numRecords));
-
-catch ME
-    warning("OPTION A fetch-all-records failed: %s\nTrying OPTION B (looped fetch)...", ME.message);
-
-    %% ========= OPTION B: Fetch ONE record at a time in a loop =========
-    % This does NOT rely on FetchNumRecords property; we only change FetchRecordNumber.
-    % Some ividev wrappers expose attributes via set/ getAttribute methods instead.
-
-    wfmMat = zeros(recordLength, numRecords);
-    infoCell = cell(1, numRecords);
-
-    for k = 0:numRecords-1
-        % Set which record to fetch
-        niScopeDev.FetchRecordNumber = k;   % zero-based
-        niScopeDev.FetchNumRecords   = 1;   % only 1 record
-
-        [wfm_k, info_k] = niScopeDev.fetch(channelID, timeout_ms, recordLength);
-
-        if isfield(info_k, 'actualSamples')
-            Nk = double(info_k.actualSamples);
-        else
-            Nk = numel(wfm_k);
-        end
-
-        wfmMat(1:Nk, k+1) = wfm_k(1:Nk);
-        infoCell{k+1} = info_k;
-    end
-
-    % Use info from first record to build time axis
-    info0 = infoCell{1};
-    if isfield(info0, 'xIncrement')
-        dt = info0.xIncrement;
-    else
-        dt = 1 / sampleRate;
-    end
-
-    if isfield(info0, 'xOrigin')
-        t0 = info0.xOrigin;
-    else
-        t0 = 0;
-    end
-
-    N = recordLength;
-    t = t0 + (0:N-1) * dt;
-
-    figure;
-    plot(t, wfmMat);
-    grid on;
-    xlabel('Time (s)');
-    ylabel('Voltage (V)');
-    legend(arrayfun(@(k) sprintf('Record %d', k), 0:numRecords-1, 'UniformOutput', false));
-    title(sprintf('Channel %s, %d records (edge-triggered, looped fetch)', channelID, numRecords));
+    % -----------------------------------------
+    % 5. Build time axis for this record
+    % -----------------------------------------
+    tCell{k+1} = t0_k + (0:pts_k-1) * dt_k;
 end
+
+%% ------ Plot results ------
+figure; hold on;
+for k = 1:numRecords
+    plot(tCell{k}, wfmMat(:,k), "DisplayName", sprintf("Record %d", k-1));
+end
+xlabel("Time (s)");
+ylabel("Voltage (V)");
+title("Multi-record acquisition using setAttributeViInt32 + fetchWaveform");
+legend;
+grid on;
+
 
 %% Scalar measurement (e.g., RMS = 4, or MEAN = 3)
 % Measurement enum: 0 Vpp, 1 Max, 2 Min, 3 Mean, 4 RMS, ...
-measRMS = niScopeDev.fetchWaveformMeasurement(channelID, 4);
+measRMS = niScopeDev.fetchWaveformMeasurement(channelID, 0);
 fprintf('RMS (record 0) = %.6f V\n', measRMS);
 
 %% 9. Clean up
