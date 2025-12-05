@@ -69,7 +69,7 @@ chanStr     = '0';         % Channel Name
 vRange      = 10.0;        % 10 Vpk-pk
 vOffset     = 0.0;         % 0V Offset
 sampleRate  = 100e6;        % 20 MS/s
-minRecord   = 100;        % Request at least 1000 points
+minRecord   = 500;        % Request at least 1000 points
 timeout     = 5.0;         % 5 second timeout
 
 %% 2. Initialize Session (niScope_init)
@@ -92,7 +92,45 @@ fprintf('Session Initialized. Handle: %d\n', vi);
 % Safety: Close session if script errors later
 cleanupObj = onCleanup(@() calllib('niscope', 'niScope_close', vi));
 
-%% 3. Configure Vertical (niScope_ConfigureVertical)
+
+%% 3b. Configure Channel Impedance and Filter
+% Validated against niScope.h
+% Function defined as: (ViSession, ViConstString, ViReal64, ViReal64)
+
+% --- Configuration ---
+% Impedance: 50.0 or 1000000.0 (1MOhm)
+% Check your device specs! If 50 Ohm fails, use 1000000.0
+targetImpedance = 50.0; 
+
+% Bandwidth: 0 (Default) or -1 (Full) or specific Hz (e.g. 20e6)
+targetBandwidth = 0; 
+
+try
+    status = calllib('niscope', 'niScope_ConfigureChanCharacteristics', ...
+        vi, ...              % Session Handle
+        chanNamePtr, ...     % Channel Name Pointer (from Step 3)
+        targetImpedance, ... % ViReal64 (double)
+        targetBandwidth);    % ViReal64 (double)
+
+    if status < 0
+        % If 50 Ohm fails, try 1MOhm automatically
+        warning('50 Ohm setup failed (Status %d). Retrying with 1 MOhm...', status);
+        status = calllib('niscope', 'niScope_ConfigureChanCharacteristics', ...
+            vi, chanNamePtr, 1000000.0, targetBandwidth);
+            
+        if status < 0
+             error('Failed to set impedance. Status: %d', status);
+        else
+             fprintf('Fallback successful: Configured 1 MOhm Input Impedance.\n');
+        end
+    else
+        fprintf('Success: Configured %.0f Ohm Input Impedance.\n', targetImpedance);
+    end
+catch ME
+    disp(ME.message);
+end
+
+%% %% 3. Configure Vertical (niScope_ConfigureVertical)
 % Prototype: niScope_ConfigureVertical(ulong, int8Ptr, double, double, long, double, uint16)
 
 chanNamePtr = libpointer('int8Ptr', [int8(chanStr) 0]);
@@ -104,6 +142,8 @@ status = calllib('niscope', 'niScope_ConfigureVertical', ...
     vi, chanNamePtr, vRange, vOffset, couplingDC, probeAtten, enabled);
 
 if status < 0, error('Vertical config failed: %d', status); end
+
+
 
 %% 4. Configure Horizontal (niScope_ConfigureHorizontalTiming)
 % Prototype: niScope_ConfigureHorizontalTiming(ulong, double, long, double, long, uint16)
@@ -143,7 +183,7 @@ end
 % Prototype: [long, int8Ptr] niScope_ConfigureTriggerEdge(ulong, int8Ptr, double, long, long, double, double)
 
 % --- User Parameters ---
-triggerSourceStr = '0';     % Use '0', '1', or 'External' (Note: 'TRIG' might need to be 'External' or 'VAL_EXTERNAL' depending on driver)
+triggerSourceStr = 'TRIG';     % Use '0', '1', or 'External' (Note: 'TRIG' might need to be 'External' or 'VAL_EXTERNAL' depending on driver)
 triggerLevel     = 0.2;     % Volts
 triggerSlope     = 1;       % 1 = Positive (Rising), 0 = Negative (Falling)
 triggerCoupling  = 1;       % 1 = DC, 0 = AC (Based on your input. Note: Standard NI headers often use DC=0, AC=1. Verify if you see signal drift.)
@@ -224,7 +264,7 @@ fprintf('Attempting Safe Fetch...\n');
 
 % 1. Buffer Safety: Allocate slightly more than needed
 % This prevents crashes if the driver writes 1-2 extra bytes due to alignment.
-bufferSize = actualPoints + 64; 
+bufferSize = actualPoints + 0; 
 wfmPtr  = libpointer('doublePtr', zeros(1, bufferSize));
 
 % 2. Struct Safety: Pass NULL for the info struct first.
@@ -254,7 +294,6 @@ yData = wfmPtr.Value(1:actualPoints); % Truncate the safety padding
 dt = 1/sampleRate; % You set this in Step 1
 xData = (0:length(yData)-1) * dt;
 
-plot(xData, yData);
 
 %% 10. Plot
 figure;
