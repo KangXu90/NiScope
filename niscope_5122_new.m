@@ -117,12 +117,65 @@ status = calllib('niscope', 'niScope_ConfigureHorizontalTiming', ...
 
 if status < 0, error('Horizontal config failed: %d', status); end
 
-%% 5. Configure Trigger (niScope_ConfigureTriggerImmediate)
-% Prototype: niScope_ConfigureTriggerImmediate(ulong)
+%% %% Check Actual Sample Rate (niScope_SampleRate)
+% Prototype: [long, doublePtr] niScope_SampleRate(ulong, doublePtr)
 
-status = calllib('niscope', 'niScope_ConfigureTriggerImmediate', vi);
-if status < 0, error('Trigger config failed: %d', status); end
+% 1. Create a pointer to hold the result
+actualRatePtr = libpointer('doublePtr', 0);
 
+% 2. Call the function
+status = calllib('niscope', 'niScope_SampleRate', vi, actualRatePtr);
+
+% 3. Error Checking & Display
+if status < 0
+    errBuf = libpointer('int8Ptr', zeros(1, 1024, 'int8'));
+    calllib('niscope', 'niScope_GetErrorMessage', vi, status, 1024, errBuf);
+    error('niScope_SampleRate failed: %s', char(errBuf.Value(errBuf.Value~=0)));
+else
+    actualRate = actualRatePtr.Value;
+    fprintf('------------------------------------------------\n');
+    fprintf('Requested Rate : %.2f MS/s\n', sampleRate / 1e6);
+    fprintf('Actual Rate    : %.2f MS/s\n', actualRate / 1e6);
+    fprintf('------------------------------------------------\n');
+end
+
+%% 5. Configure Edge Trigger (niScope_ConfigureTriggerEdge)
+% Prototype: [long, int8Ptr] niScope_ConfigureTriggerEdge(ulong, int8Ptr, double, long, long, double, double)
+
+% --- User Parameters ---
+triggerSourceStr = '0';     % Use '0', '1', or 'External' (Note: 'TRIG' might need to be 'External' or 'VAL_EXTERNAL' depending on driver)
+triggerLevel     = 0.2;     % Volts
+triggerSlope     = 1;       % 1 = Positive (Rising), 0 = Negative (Falling)
+triggerCoupling  = 1;       % 1 = DC, 0 = AC (Based on your input. Note: Standard NI headers often use DC=0, AC=1. Verify if you see signal drift.)
+holdoff          = 0.0;     % Seconds
+delay            = 0.0;     % Seconds
+
+% --- Type Casting for DLL ---
+% Convert string to C-String pointer
+trigSrcPtr = libpointer('int8Ptr', [int8(triggerSourceStr) 0]);
+
+% Convert Enums/Ints to int32 (C 'long')
+slopeVal    = int32(triggerSlope);
+couplingVal = int32(triggerCoupling);
+
+% --- Call Library Function ---
+status = calllib('niscope', 'niScope_ConfigureTriggerEdge', ...
+    vi, ...             % Session Handle (ulong)
+    trigSrcPtr, ...     % Trigger Source (int8Ptr)
+    triggerLevel, ...   % Level (double)
+    slopeVal, ...       % Slope (long)
+    couplingVal, ...    % Coupling (long)
+    holdoff, ...        % Holdoff (double)
+    delay);             % Delay (double)
+
+% --- Error Checking ---
+if status < 0
+    errBuf = libpointer('int8Ptr', zeros(1, 1024, 'int8'));
+    calllib('niscope', 'niScope_GetErrorMessage', vi, status, 1024, errBuf);
+    error('ConfigureTriggerEdge failed: %s', char(errBuf.Value(errBuf.Value~=0)));
+else
+    fprintf('Trigger Configured: Edge on %s at %.2f V\n', triggerSourceStr, triggerLevel);
+end
 %% 6. Initiate Acquisition (niScope_InitiateAcquisition)
 % Prototype: long niScope_InitiateAcquisition(ulong)
 
@@ -166,37 +219,42 @@ calllib('niscope', 'niScope_ActualRecordLength', vi, recLenPtr);
 actualPoints = recLenPtr.Value;
 fprintf('Actual Record Length: %d points\n', actualPoints);
 
-%% 9. Fetch Data (niScope_Fetch)
-% Prototype: [long, int8Ptr, doublePtr, niScope_wfmInfoPtr] niScope_Fetch(...)
+%% 9. Fetch Data (Safe Mode)
+fprintf('Attempting Safe Fetch...\n');
 
-% Allocate buffers
-wfmPtr  = libpointer('doublePtr', zeros(1, actualPoints));
-infoStruct = libstruct('niScope_wfmInfo');
-infoPtr = libpointer('niScope_wfmInfoPtr', infoStruct);
+% 1. Buffer Safety: Allocate slightly more than needed
+% This prevents crashes if the driver writes 1-2 extra bytes due to alignment.
+bufferSize = actualPoints + 64; 
+wfmPtr  = libpointer('doublePtr', zeros(1, bufferSize));
 
-% Call Fetch
+% 2. Struct Safety: Pass NULL for the info struct first.
+% If this works, we know the previous crash was due to struct definition mismatch.
+% We can calculate dt manually: dt = 1/sampleRate.
+infoPtr = libpointer('niScope_wfmInfoPtr', []); 
+
+% 3. Call Fetch
 status = calllib('niscope', 'niScope_Fetch', ...
-    vi, ...             % Session
-    chanNamePtr, ...    % Channel String
-    timeout, ...        % Timeout
-    actualPoints, ...   % Num Samples
-    wfmPtr, ...         % Waveform Array (Output)
-    infoPtr);           % Info Struct (Output)
+    vi, ...             
+    chanNamePtr, ...    
+    timeout, ...        
+    actualPoints, ...   % Ask for specific amount
+    wfmPtr, ...         
+    infoPtr);           % Pass NULL
 
 if status < 0
-    % Retrieve Error Message if failed
-    % Prototype: [long, int8Ptr] niScope_GetErrorMessage(ulong, long, long, int8Ptr)
     errBuf = libpointer('int8Ptr', zeros(1, 1024, 'int8'));
     calllib('niscope', 'niScope_GetErrorMessage', vi, status, 1024, errBuf);
     error('Fetch failed: %s', char(errBuf.Value(errBuf.Value~=0)));
 end
 
-% Extract Data
-yData = wfmPtr.Value;
-wfmInfo = infoPtr.Value;
-dt = wfmInfo.xIncrement;
-t0 = wfmInfo.absoluteInitialX;
-xData = (0:actualPoints-1) * dt;
+fprintf('Fetch Successful!\n');
+
+% 4. Manual reconstruction of Time vector (since we skipped wfmInfo)
+yData = wfmPtr.Value(1:actualPoints); % Truncate the safety padding
+dt = 1/sampleRate; % You set this in Step 1
+xData = (0:length(yData)-1) * dt;
+
+plot(xData, yData);
 
 %% 10. Plot
 figure;
