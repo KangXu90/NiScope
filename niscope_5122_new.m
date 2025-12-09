@@ -104,7 +104,7 @@ cleanupObj = onCleanup(@() calllib('niscope', 'niScope_close', vi));
 % --- Configuration ---
 % Impedance: 50.0 or 1000000.0 (1MOhm)
 % Check your device specs! If 50 Ohm fails, use 1000000.0
-targetImpedance = 50.0; 
+targetImpedance = 1000000.0; 
 
 % Bandwidth: 0 (Default) or -1 (Full) or specific Hz (e.g. 20e6)
 targetBandwidth = 0; 

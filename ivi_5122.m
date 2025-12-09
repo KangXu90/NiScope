@@ -14,7 +14,7 @@ verticalOffset = 0.0;        % Vertical offset (Volts)
 sampleRate     = 100e6;      % Sample rate (Samples/second)
 recordLength   = 100;       % Points PER RECORD
 refPosition    = 50.0;       % Reference position (% of record)
-numRecords     = 10;          % <<< 3 segments
+numRecords     = 1;          % <<< 3 segments
 timeout_s      = 5.0;        % Timeout in seconds
 
 %% 1. Connect to the Instrument
