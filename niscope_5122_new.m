@@ -54,7 +54,7 @@ chanStr     = '0';         % Channel Name
 vRange      = 1.0;         % 10 Vpk-pk
 vOffset     = 0.0;         % 0V Offset
 sampleRate  = 20e6;        % 20 MS/s
-minRecord   = 1000000;     % Request 1M points
+minRecord   = 100000;     % Request 1M points
 timeout     = 5.0;         % 5 second timeout
 
 %% 2. Initialize Session (niScope_init)
@@ -101,7 +101,7 @@ if status < 0, error('Horizontal config failed: %d', status); end
 triggerSourceStr = 'TRIG';     
 trigSrcPtr = libpointer('int8Ptr', [int8(triggerSourceStr) 0]);
 status = calllib('niscope', 'niScope_ConfigureTriggerEdge', ...
-    vi, trigSrcPtr, 0.2, int32(1), int32(1), 0.0, 0.0);
+    vi, trigSrcPtr, 0.1, int32(1), int32(1), 0.0, 0.0);
 if status < 0
      % Error handling omitted for brevity, but recommended
 end
@@ -129,35 +129,20 @@ actualPoints = recLenPtr.Value;
 fprintf('Actual Record Length: %d points\n', actualPoints);
 
 %% ==========================================================
-%% 10. NEW: Fetch Binary & Scale (The Fast Method)
 %% ==========================================================
-fprintf('Attempting Binary Fetch (Int16)...\n');
+%% ==========================================================
+%% 10. NEW: Fetch Binary (Raw Data Only)
+%% ==========================================================
+fprintf('Attempting Binary Fetch (Int16 - Raw)...\n');
 
-% A. Get Scaling Coefficients (Gain & Offset)
-% We need these to convert raw Int16 codes back to Volts.
-% We get them BEFORE fetching to keep the Fetch call clean.
-gainPtr   = libpointer('doublePtr', 1.0);
-offsetPtr = libpointer('doublePtr', 0.0);
-status = calllib('niscope', 'niScope_GetScalingCoefficients', ...
-    vi, chanNamePtr, gainPtr, offsetPtr);
-
-if status < 0
-    error('Failed to get scaling coefficients: %d', status);
-end
-
-gain = gainPtr.Value;
-offset = offsetPtr.Value;
-fprintf('Scaling: Gain = %e, Offset = %e\n', gain, offset);
-
-% B. Prepare Int16 Buffer
+% A. Prepare Int16 Buffer
 % Allocate exactly what we need (plus small safety padding)
-% Note: Use 'int16' type, not 'double'
 bufferSize = actualPoints + 16; 
 rawArray   = zeros(1, bufferSize, 'int16'); 
 rawPtr     = libpointer('int16Ptr', rawArray);
 
-% C. Fetch Binary Data
-% We pass [] (NULL) for the wfmInfo struct to avoid the crashes you saw earlier.
+% B. Fetch Binary Data
+% We pass [] (NULL) for the wfmInfo struct to keep it fast/safe.
 status = calllib('niscope', 'niScope_FetchBinary16', ...
     vi, ...             
     chanNamePtr, ...    
@@ -173,22 +158,24 @@ if status < 0
 end
 fprintf('Binary Fetch Successful!\n');
 
-% D. Convert Raw Codes to Volts
-% Formula: Voltage = (BinaryCode * Gain) + Offset
-rawCodes = rawPtr.Value(1:actualPoints); % Truncate padding
-yData = double(rawCodes) * gain + offset;
+% C. Extract Raw Data
+% We do NOT convert to Volts. We just take the raw integers.
+rawCodes = rawPtr.Value(1:actualPoints); 
 
-% E. Reconstruct Time Vector
+% D. Reconstruct Time Vector
 dt = 1/sampleRate;
-xData = (0:length(yData)-1) * dt;
+xData = (0:length(rawCodes)-1) * dt;
 
-%% 11. Plot
+%% 11. Plot Raw Data
 figure;
-plot(xData, yData);
-title(['Channel ' chanStr ' Data (Binary Fetch)']);
+plot(xData, rawCodes);
+title(['Channel ' chanStr ' Raw ADC Codes']);
 xlabel('Time (s)');
-ylabel('Voltage (V)');
+ylabel('Raw ADC Value (Int16)');
 grid on;
+
+% Note: The Y-axis will now show integers (e.g., -8192 to +8191 for 14-bit)
+% instead of Volts.
 
 %% 12. Close Session
 if exist('vi', 'var')
