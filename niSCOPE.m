@@ -16,7 +16,7 @@ end
 
 
 %% 1. Configure NI-SCOPE DLL and header file paths
-dllfile = 'C:\Program Files\IVI Foundation\IVI\Bin\niScope_32.dll';
+dllfile = 'C:\Program Files\IVI Foundation\IVI\Bin\niScope_64.dll';
 hfile   = 'C:\Program Files\IVI Foundation\IVI\Include\niScope.h';
 
 % inc = 'C:\Program Files\IVI Foundation\VISA\WinNT\include';  % <- one char
@@ -33,9 +33,7 @@ end
 %% 2. Load the NI-SCOPE library
 if ~libisloaded('niscope')
     loadlibrary(dllfile, hfile, 'alias','niscope', ...
-        'includepath', inc,...
-        'mfilename','niscope_proto');
-
+        'includepath', inc);
 
     disp('NI-SCOPE library loaded');
 end

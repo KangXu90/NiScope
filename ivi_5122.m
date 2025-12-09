@@ -13,8 +13,8 @@ maxRangeV      = 10.0;       % Vertical range (Volts)
 verticalOffset = 0.0;        % Vertical offset (Volts)
 sampleRate     = 100e6;      % Sample rate (Samples/second)
 recordLength   = 100;       % Points PER RECORD
-refPosition    = 0.0;       % Reference position (% of record)
-numRecords     = 100;          % <<< 3 segments
+refPosition    = 50.0;       % Reference position (% of record)
+numRecords     = 10;          % <<< 3 segments
 timeout_s      = 5.0;        % Timeout in seconds
 
 %% 1. Connect to the Instrument
@@ -26,11 +26,11 @@ catch ME
 end
 
 %% 2. Basic Reset & Auto-Setup (optional)
-% try
-%      reset(niScopeDev);
-% catch ME
-%     warning('Reset/autoSetup failed or unsupported: %s', ME.message);
-% end
+try
+       reset(niScopeDev);
+catch ME
+    warning('Reset/autoSetup failed or unsupported: %s', ME.message);
+end
 %% 3. Configure channel Characteristics
 inputImpedance = 50; % 50 ohm input impedance
 maxInputFrequency = 0; % filter bandwidth at input 0 means default
@@ -85,6 +85,11 @@ timeout_ms = timeout_s * 1000;
 %% ------ Attribute IDs from niScope.h ------
 NISCOPE_ATTR_FETCH_RECORD_NUMBER = 1150079;
 NISCOPE_ATTR_FETCH_NUM_RECORDS   = 1150080;
+% NISCOPE_ATTR_ALLOW_MORE_RECORDS_THAN_MEMORY = 1150068;
+% 
+% setAttributeViBoolean(niScopeDev, "", ...
+%     NISCOPE_ATTR_ALLOW_MORE_RECORDS_THAN_MEMORY, true);
+
 
 %% ------ Loop through each record WANT: record = 0,1,2,... ------
 wfmMat = zeros(recordLength, numRecords);
@@ -134,7 +139,7 @@ end
 xlabel("Time (s)");
 ylabel("Voltage (V)");
 title("Multi-record acquisition using setAttributeViInt32 + fetchWaveform");
-legend;
+% legend;
 grid on;
 
 

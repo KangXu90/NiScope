@@ -66,7 +66,7 @@ functions = libfunctions('niscope', '-full');
 %% 1. Setup Parameters
 devNameStr  = 'DEV1';      % Device Name in NI MAX
 chanStr     = '0';         % Channel Name
-vRange      = 10.0;        % 10 Vpk-pk
+vRange      = 5.0;        % 10 Vpk-pk
 vOffset     = 0.0;         % 0V Offset
 sampleRate  = 100e6;        % 20 MS/s
 minRecord   = 500;        % Request at least 1000 points
@@ -86,8 +86,12 @@ if status < 0
     error('niScope_init failed with status: %d', status);
 end
 
+
 vi = viPtr.Value; % This is your 'ulong' session handle for all future calls
 fprintf('Session Initialized. Handle: %d\n', vi);
+
+chk(calllib('niscope', 'niScope_reset', vi));
+
 
 % Safety: Close session if script errors later
 cleanupObj = onCleanup(@() calllib('niscope', 'niScope_close', vi));
@@ -116,7 +120,7 @@ try
         % If 50 Ohm fails, try 1MOhm automatically
         warning('50 Ohm setup failed (Status %d). Retrying with 1 MOhm...', status);
         status = calllib('niscope', 'niScope_ConfigureChanCharacteristics', ...
-            vi, chanNamePtr, 1000000.0, targetBandwidth);
+            vi, chanNamePtr, targetImpedance, targetBandwidth);
             
         if status < 0
              error('Failed to set impedance. Status: %d', status);
@@ -264,7 +268,7 @@ fprintf('Attempting Safe Fetch...\n');
 
 % 1. Buffer Safety: Allocate slightly more than needed
 % This prevents crashes if the driver writes 1-2 extra bytes due to alignment.
-bufferSize = actualPoints + 0; 
+bufferSize = actualPoints + 10; 
 wfmPtr  = libpointer('doublePtr', zeros(1, bufferSize));
 
 % 2. Struct Safety: Pass NULL for the info struct first.
@@ -311,4 +315,11 @@ if exist('vi', 'var')
     calllib('niscope', 'niScope_close', vi);
     clear vi;
     fprintf('Session Closed.\n');
+end
+
+%% Helper Function
+function chk(status)
+    if status < 0
+        error('NI-SCOPE Error: %d', status);
+    end
 end
