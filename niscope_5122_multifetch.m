@@ -125,42 +125,54 @@ chk(calllib('niscope', 'niScope_SetAttributeViInt32', ...
 fprintf('Initiating acquisition of %d records...\n', numRecords);
 chk(calllib('niscope', 'niScope_InitiateAcquisition', vi));
 
-%% 7. Fetch Loop
-% Get actual record length
-rlPtr = libpointer('int32Ptr', 0);
-chk(calllib('niscope', 'niScope_ActualRecordLength', vi, rlPtr));
-recPts = rlPtr.Value;
+%% 7. Optimized 16-bit Binary Fetch Loop
+% Ref: NI-SCOPE Manual Pg 199 "Retrieving Data... Fetching binary data saves time"
 
-% Allocate ONE buffer (Reused to save memory)
-wfmPtr = libpointer('doublePtr', zeros(1, recPts));
-infoPtr = libpointer('niScope_wfmInfoPtr', []); 
+% 1. Get Record Length
+recLenPtr = libpointer('int32Ptr', 0);
+chk(calllib('niscope', 'niScope_ActualRecordLength', vi, recLenPtr));
+recPts = recLenPtr.Value;
 
-% Pre-allocate storage matrix
-allData = zeros(numRecords, recPts);
+% 2. Allocate BINARY Buffers (int16)
+% "Uses significantly less memory (2 bytes instead of 8 bytes per sample)" 
+wfmPtr = libpointer('int16Ptr', zeros(1, recPts, 'int16'));
 
-fprintf('Entering Fetch Loop (Buffer: %d pts)\n', recPts);
+% We MUST fetch the wfmInfo struct to get the Gain/Offset for scaling later [cite: 2466]
+infoStruct = libstruct('niScope_wfmInfo');
+infoPtr = libpointer('niScope_wfmInfoPtr', infoStruct);
+
+% Pre-allocate storage matrix as INT16 (Saves 4x RAM in MATLAB too)
+allData_Raw = zeros(numRecords, recPts, 'int16');
+scalingFactors = zeros(numRecords, 2); % To store [Gain, Offset] for each record
+
+fprintf('Entering 16-bit Fetch Loop (Buffer: %d pts)\n', recPts);
 t0 = tic;
 
 for i = 0 : (numRecords - 1)
-    % A. Select Record 'i'
+    % A. Select Record
     chk(calllib('niscope', 'niScope_SetAttributeViInt32', ...
         vi, nullPtr, NISCOPE_ATTR_FETCH_RECORD_NUMBER, i));
     
-    % B. Fetch (Blocks until Record 'i' is ready)
-    status = calllib('niscope', 'niScope_Fetch', ...
+    % B. Fetch Binary16 [cite: 2461]
+    status = calllib('niscope', 'niScope_FetchBinary16', ...
         vi, chanPtr, timeout, recPts, wfmPtr, infoPtr);
     
     if status < 0
-        % Handle overwrite errors gracefully
         errBuf = libpointer('int8Ptr', zeros(1, 1024, 'int8'));
         calllib('niscope', 'niScope_GetErrorMessage', vi, status, 1024, errBuf);
         error('Fetch Error (Rec %d): %s', i, char(errBuf.Value(errBuf.Value~=0)));
     end
     
-    % C. Store Data (Explicit truncation prevents reallocation)
-    allData(i+1, :) = wfmPtr.Value(1:recPts);
+    % C. Store Raw Integers
+    allData_Raw(i+1, :) = wfmPtr.Value(1:recPts);
     
-    if mod(i, 100) == 0
+    % D. Store Scaling Factors (Gain/Offset) [cite: 2466]
+    % infoPtr.Value is the struct containing .gain and .offset
+    info = infoPtr.Value;
+    scalingFactors(i+1, 1) = info.gain;
+    scalingFactors(i+1, 2) = info.offset;
+    
+    if mod(i, 1000) == 0
         fprintf('Fetched %d / %d records...\n', i, numRecords);
     end
 end
@@ -168,13 +180,20 @@ dt = toc(t0);
 fprintf('Completed %d records in %.2f seconds (%.1f Recs/sec).\n', ...
     numRecords, dt, numRecords/dt);
 
-%% 8. Visualization
-figure('Color', 'w');
-plot(allData'); % Transpose to plot columns as traces
-grid on;
-title(sprintf('Multi-Record Acquisition (%d Records)', numRecords));
-xlabel('Samples'); ylabel('Voltage (V)');
+%% 8. Visualization (Convert to Voltage on the fly) 
+% Voltage = Binary * Gain + Offset
+recToView = 1;
+rawTrace = double(allData_Raw(recToView, :));
+gain = scalingFactors(recToView, 1);
+offset = scalingFactors(recToView, 2);
 
+voltsTrace = (rawTrace * gain) + offset;
+
+figure('Color', 'w');
+plot(voltsTrace); 
+grid on;
+title(sprintf('Record %d (Converted from 16-bit)', recToView));
+ylabel('Voltage (V)');
 %% 9. Helper Function
 function chk(status)
     if status < 0
