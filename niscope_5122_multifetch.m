@@ -26,12 +26,12 @@ if libisloaded('niscope')
 end
 
 %% 1. Configuration Parameters
-devNameStr   = 'DEV1';     
+devNameStr   = 'DEV4';     
 chanStr      = '0';        
-vRange       = 2.0;        % Max 5V for 50 Ohm on 5122
+vRange       = 1.0;        % Max 5V for 50 Ohm on 5122
 sampleRate   = 100e6;      % 100 MS/s
-minRecord    = 100;       % Points per record
-numRecords   = 1000;       % Total records
+minRecord    = 200;       % Points per record
+numRecords   = 10000;       % Total records
 timeout      = 5.0;        % Timeout per record
 
 % Attribute IDs
@@ -83,8 +83,8 @@ trigSrcPtr = libpointer('int8Ptr', [int8('TRIG') 0]);
 
 
 % Vertical (50 Ohm, 5V Range)
-chk(calllib('niscope', 'niScope_ConfigureVertical', vi, chanPtr, vRange, 0.0, int32(0), 1.0, uint16(1)));
-chk(calllib('niscope', 'niScope_ConfigureChanCharacteristics', vi, chanPtr, 1000000.0, 0.0));
+chk(calllib('niscope', 'niScope_ConfigureVertical', vi, chanPtr, vRange, 0.0, int32(1), 1.0, uint16(1)));
+chk(calllib('niscope', 'niScope_ConfigureChanCharacteristics', vi, chanPtr, 50.0, 0.0));
 
 % Horizontal (Multi-Record)
 chk(calllib('niscope', 'niScope_ConfigureHorizontalTiming', ...
@@ -99,7 +99,7 @@ chk(calllib('niscope', 'niScope_ConfigureTriggerEdge', ...
 % For 1 record of 100 points, this MUST be disabled (0).
 
 totalBytes = double(numRecords) * double(minRecord) * 2; % 16-bit samples
-onboardMemory = 8 * 1024 * 1024; % Assuming 8MB standard for 5122
+onboardMemory = 3.125 * 1024 * 1024; % Assuming 8MB standard for 5122
 
 if totalBytes > onboardMemory
     fprintf('Large Acquisition detected (%.2f MB). Enabling Circular Buffer.\n', totalBytes/1024/1024);
@@ -111,7 +111,7 @@ end
 
 try
     chk(calllib('niscope', 'niScope_SetAttributeViBoolean', ...
-        vi, emptyStrPtr, NISCOPE_ATTR_ALLOW_MORE_RECORDS_THAN_MEMORY, enableMore));
+        vi, nullPtr, NISCOPE_ATTR_ALLOW_MORE_RECORDS_THAN_MEMORY, enableMore));
 catch
     fprintf('Warning: Could not set memory attribute.\n');
 end
@@ -160,7 +160,7 @@ for i = 0 : (numRecords - 1)
     % C. Store Data (Explicit truncation prevents reallocation)
     allData(i+1, :) = wfmPtr.Value(1:recPts);
     
-    if mod(i, 10) == 0
+    if mod(i, 100) == 0
         fprintf('Fetched %d / %d records...\n', i, numRecords);
     end
 end
