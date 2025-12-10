@@ -3,14 +3,14 @@
 %  Hardware: NI PXI-5122 (and compatible)
 
 %% 0. Hard Cleanup (Crucial for Speed on Repeat Runs)
-% This block forces MATLAB to release "zombie" driver handles and 
+% This block forces MATLAB to release "zombie" driver handles and
 % fragmented memory from previous runs.
 try
     % Find any open sessions in the workspace and close them
     cleanVars = who;
     for i = 1:length(cleanVars)
         val = eval(cleanVars{i});
-        if isa(val, 'uint32') && val > 0 
+        if isa(val, 'uint32') && val > 0
             % Attempt to close if it looks like a session handle
             try calllib('niscope', 'niScope_close', val); catch, end
         end
@@ -19,24 +19,24 @@ catch
 end
 
 % Clear workspace and force library unload
-clear; clc; close all; 
+clear; clc; close all;
 if libisloaded('niscope')
     unloadlibrary('niscope');
     fprintf('System cleaned. Ready for fresh acquisition.\n');
 end
 
 %% 1. Configuration Parameters
-devNameStr   = 'DEV4';     
-chanStr      = '0';        
+devNameStr   = 'DEV4';
+chanStr      = '0';
 vRange       = 1.0;        % Max 5V for 50 Ohm on 5122
 sampleRate   = 100e6;      % 100 MS/s
-minRecord    = 200;       % Points per record
-numRecords   = 100;       % Total records
+minRecord    = 100;       % Points per record
+numRecords   = 10000;       % Total records
 timeout      = 5.0;        % Timeout per record
 
 % Attribute IDs
-NISCOPE_ATTR_FETCH_RECORD_NUMBER    = 1150079; 
-NISCOPE_ATTR_FETCH_NUM_RECORDS      = 1150080; 
+NISCOPE_ATTR_FETCH_RECORD_NUMBER    = 1150079;
+NISCOPE_ATTR_FETCH_NUM_RECORDS      = 1150080;
 NISCOPE_ATTR_ALLOW_MORE_RECORDS_THAN_MEMORY = 1150068;
 
 %% 2. Load and Sanitize Driver
@@ -61,8 +61,8 @@ catch ME
     error('Library Load Error: %s', ME.message);
 end
 % Or print them to the command window:
-    m = libfunctions('niscope', '-full');
-    disp(m);
+m = libfunctions('niscope', '-full');
+disp(m);
 
 %% 3. Initialize Session & Reset
 viPtr = libpointer('uint32Ptr', 0);
@@ -97,31 +97,38 @@ chk(calllib('niscope', 'niScope_ConfigureHorizontalTiming', ...
 chk(calllib('niscope', 'niScope_ConfigureTriggerEdge', ...
     vi, trigSrcPtr, 0.2, int32(1), int32(1), 0.0, 0.0));
 
-%% 5. Advanced Memory Configuration
-% CRITICAL FIX: Only enable this if (NumRecords * RecordLength * 2 bytes) > Device Memory
-% For 1 record of 100 points, this MUST be disabled (0).
-
-totalBytes = double(numRecords) * double(minRecord) * 2; % 16-bit samples
-onboardMemory = 3.125 * 1024 * 1024; % Assuming 8MB standard for 5122
+%% 5. Advanced Memory Configuration (Set & Verify)
+totalBytes = double(numRecords) * double(minRecord) * 2;
+onboardMemory = 3.125 * 1024 * 1024; % Simulated 8MB limit
 
 if totalBytes > onboardMemory
-    fprintf('Large Acquisition detected (%.2f MB). Enabling Circular Buffer.\n', totalBytes/1024/1024);
+    fprintf('Large Acquisition. Enabling Circular Buffer.\n');
     enableMore = 1;
 else
-    fprintf('Small Acquisition detected (%.2f MB). Using Standard Memory.\n', totalBytes/1024/1024);
-    enableMore = 0; % <--- This stops the overwrite error
+    enableMore = 0;
 end
 
 try
+    % 1. SET the Attribute
     chk(calllib('niscope', 'niScope_SetAttributeViBoolean', ...
         vi, nullPtr, NISCOPE_ATTR_ALLOW_MORE_RECORDS_THAN_MEMORY, enableMore));
-catch
-    fprintf('Warning: Could not set memory attribute.\n');
+
+    % 2. READ it back to verify
+    actualValPtr = libpointer('uint16Ptr', 0); % ViBoolean is uint16
+    chk(calllib('niscope', 'niScope_GetAttributeViBoolean', ...
+        vi, nullPtr, NISCOPE_ATTR_ALLOW_MORE_RECORDS_THAN_MEMORY, actualValPtr));
+
+    % 3. Display Result
+    fprintf('Attribute Verification: Requested=%d, Actual=%d\n', ...
+        enableMore, actualValPtr.Value);
+
+catch ME
+    fprintf('Warning: Could not set/read memory attribute. Reason: %s\n', ME.message);
 end
 
-% Ensure we fetch 1 record at a time
+% Ensure we fetch ALL records (-1)
 chk(calllib('niscope', 'niScope_SetAttributeViInt32', ...
-    vi, nullPtr, NISCOPE_ATTR_FETCH_NUM_RECORDS, -1));
+    vi, nullPtr, NISCOPE_ATTR_FETCH_NUM_RECORDS, 1));
 
 %% 6. Initiate Acquisition
 % Starts hardware. Driver immediately begins capturing triggers to onboard RAM.
@@ -137,7 +144,7 @@ chk(calllib('niscope', 'niScope_ActualRecordLength', vi, recLenPtr));
 recPts = recLenPtr.Value;
 
 % 2. Allocate BINARY Buffers (int16)
-% "Uses significantly less memory (2 bytes instead of 8 bytes per sample)" 
+% "Uses significantly less memory (2 bytes instead of 8 bytes per sample)"
 wfmPtr = libpointer('int16Ptr', zeros(1, recPts, 'int16'));
 
 % We MUST fetch the wfmInfo struct to get the Gain/Offset for scaling later [cite: 2466]
@@ -155,26 +162,26 @@ for i = 0 : (numRecords - 1)
     % A. Select Record
     chk(calllib('niscope', 'niScope_SetAttributeViInt32', ...
         vi, nullPtr, NISCOPE_ATTR_FETCH_RECORD_NUMBER, i));
-    
+
     % B. Fetch Binary16 [cite: 2461]
     status = calllib('niscope', 'niScope_FetchBinary16', ...
         vi, chanPtr, timeout, recPts, wfmPtr, infoPtr);
-    
+
     if status < 0
         errBuf = libpointer('int8Ptr', zeros(1, 1024, 'int8'));
         calllib('niscope', 'niScope_GetErrorMessage', vi, status, 1024, errBuf);
         error('Fetch Error (Rec %d): %s', i, char(errBuf.Value(errBuf.Value~=0)));
     end
-    
+
     % C. Store Raw Integers
     allData_Raw(i+1, :) = wfmPtr.Value(1:recPts);
-    
+
     % D. Store Scaling Factors (Gain/Offset) [cite: 2466]
     % infoPtr.Value is the struct containing .gain and .offset
-    info = infoPtr.Value;
-    scalingFactors(i+1, 1) = info.gain;
-    scalingFactors(i+1, 2) = info.offset;
-    
+    % info = infoPtr.Value;
+    % scalingFactors(i+1, 1) = info.gain;
+    % scalingFactors(i+1, 2) = info.offset;
+    %
     if mod(i, 1000) == 0
         fprintf('Fetched %d / %d records...\n', i, numRecords);
     end
@@ -183,17 +190,40 @@ dt = toc(t0);
 fprintf('Completed %d records in %.2f seconds (%.1f Recs/sec).\n', ...
     numRecords, dt, numRecords/dt);
 
-%% 8. Visualization (Raw Integer Codes)
-% Plotting raw ADC codes (e.g., -32768 to +32767)
+%% 8. Visualization (Voltage vs Time)
+% Extract scaling info from the LAST fetch (valid for all records in this config)
+finalInfo = infoPtr.Value;
+
+% Read parameters from the struct
+gain       = finalInfo.gain;
+offset     = finalInfo.offset;
+xIncrement = finalInfo.xIncrement;
+
+fprintf('Scaling Applied: Gain=%.4e, Offset=%.4e, dt=%.4e\n', gain, offset, xIncrement);
+
+% 1. Create Time Vector
+% Time = Index * xIncrement
+timeVector = double(0 : recPts - 1) * xIncrement;
+
+% 2. Convert Raw Data to Voltage
+% Voltage = (Binary * Gain) + Offset
+allData_Volts = (double(allData_Raw) .* gain) + offset;
+
+% 3. Plot
 figure('Color', 'w');
-plot(allData_Raw'); % Transpose to plot records as traces
+plot(timeVector, allData_Volts'); % Transpose so Time is X-axis
 grid on;
-title(sprintf('Multi-Record Acquisition (Raw 16-bit Data)'));
-xlabel('Samples'); 
-ylabel('ADC Code (Int16)');
+title(sprintf('Voltage vs Time (%d Records)', numRecords));
+xlabel('Time (s)');
+ylabel('Voltage (V)');
+
+% Optional: Plot Average
+hold on;
+plot(timeVector, mean(allData_Volts, 1), 'k', 'LineWidth', 2);
+legend('Individual Records', 'Average');
 %% 9. Helper Function
 function chk(status)
-    if status < 0
-        error('NI-SCOPE Error: %d', status);
-    end
+if status < 0
+    error('NI-SCOPE Error: %d', status);
+end
 end
