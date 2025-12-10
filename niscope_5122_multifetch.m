@@ -31,7 +31,7 @@ chanStr      = '0';
 vRange       = 1.0;        % Max 5V for 50 Ohm on 5122
 sampleRate   = 100e6;      % 100 MS/s
 minRecord    = 200;       % Points per record
-numRecords   = 10000;       % Total records
+numRecords   = 100;       % Total records
 timeout      = 5.0;        % Timeout per record
 
 % Attribute IDs
@@ -60,6 +60,9 @@ try
 catch ME
     error('Library Load Error: %s', ME.message);
 end
+% Or print them to the command window:
+    m = libfunctions('niscope', '-full');
+    disp(m);
 
 %% 3. Initialize Session & Reset
 viPtr = libpointer('uint32Ptr', 0);
@@ -88,7 +91,7 @@ chk(calllib('niscope', 'niScope_ConfigureChanCharacteristics', vi, chanPtr, 50.0
 
 % Horizontal (Multi-Record)
 chk(calllib('niscope', 'niScope_ConfigureHorizontalTiming', ...
-    vi, sampleRate, int32(minRecord), 50.0, int32(numRecords), uint16(1)));
+    vi, sampleRate, int32(minRecord), 0.0, int32(numRecords), uint16(1)));
 
 % Trigger (Edge - Channel 0)
 chk(calllib('niscope', 'niScope_ConfigureTriggerEdge', ...
@@ -118,7 +121,7 @@ end
 
 % Ensure we fetch 1 record at a time
 chk(calllib('niscope', 'niScope_SetAttributeViInt32', ...
-    vi, nullPtr, NISCOPE_ATTR_FETCH_NUM_RECORDS, 1));
+    vi, nullPtr, NISCOPE_ATTR_FETCH_NUM_RECORDS, -1));
 
 %% 6. Initiate Acquisition
 % Starts hardware. Driver immediately begins capturing triggers to onboard RAM.
