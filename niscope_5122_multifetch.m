@@ -139,7 +139,7 @@ wfmPtr = libpointer('int16Ptr', zeros(1, recPts, 'int16'));
 
 % We MUST fetch the wfmInfo struct to get the Gain/Offset for scaling later [cite: 2466]
 infoStruct = libstruct('niScope_wfmInfo');
-infoPtr = libpointer('niScope_wfmInfoPtr', infoStruct);
+infoPtr = libpointer('niScope_wfmInfoPtr', []);
 
 % Pre-allocate storage matrix as INT16 (Saves 4x RAM in MATLAB too)
 allData_Raw = zeros(numRecords, recPts, 'int16');
@@ -180,20 +180,14 @@ dt = toc(t0);
 fprintf('Completed %d records in %.2f seconds (%.1f Recs/sec).\n', ...
     numRecords, dt, numRecords/dt);
 
-%% 8. Visualization (Convert to Voltage on the fly) 
-% Voltage = Binary * Gain + Offset
-recToView = 1;
-rawTrace = double(allData_Raw(recToView, :));
-gain = scalingFactors(recToView, 1);
-offset = scalingFactors(recToView, 2);
-
-voltsTrace = (rawTrace * gain) + offset;
-
+%% 8. Visualization (Raw Integer Codes)
+% Plotting raw ADC codes (e.g., -32768 to +32767)
 figure('Color', 'w');
-plot(voltsTrace); 
+plot(allData_Raw'); % Transpose to plot records as traces
 grid on;
-title(sprintf('Record %d (Converted from 16-bit)', recToView));
-ylabel('Voltage (V)');
+title(sprintf('Multi-Record Acquisition (Raw 16-bit Data)'));
+xlabel('Samples'); 
+ylabel('ADC Code (Int16)');
 %% 9. Helper Function
 function chk(status)
     if status < 0
